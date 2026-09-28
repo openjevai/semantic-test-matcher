@@ -9,6 +9,45 @@ export const JEV_PROVIDER = 'typesafe';
 export const JEV_API_KEY_ENV = 'TYPESAFE_API_KEY';
 export const JEV_ENDPOINT = 'https://api.typesafe.ai/v1/systemone';
 
+// OpenJEV — a free community gateway to the same Jev model (https://openjev.sh).
+// Used only when explicitly chosen or when no TypeSafe key is set; TypeSafe stays the default.
+export const OPENJEV_PROVIDER = 'openjev';
+export const OPENJEV_API_KEY_ENV = 'OPENJEV_API_KEY';
+export const OPENJEV_ENDPOINT = 'https://api.openjev.sh/v1/systemone';
+export const OPENJEV_MODEL = 'openjev';
+
+export type JevProviderName = 'typesafe' | 'openjev';
+
+export interface JevProviderConfig {
+    name: JevProviderName;
+    endpoint: string;
+    apiKeyEnv: string;
+    model: string;
+}
+
+/**
+ * Resolves which Jev provider to use. TypeSafe is the default and stays unchanged
+ * for anyone with a `TYPESAFE_API_KEY`. OpenJEV is used only when explicitly chosen
+ * (`JEV_PROVIDER=openjev`) or when only `OPENJEV_API_KEY` is set.
+ */
+export function resolveJevProvider(explicit: string | undefined, model: string): JevProviderConfig {
+    if (explicit === 'openjev') {
+        return { name: 'openjev', endpoint: OPENJEV_ENDPOINT, apiKeyEnv: OPENJEV_API_KEY_ENV, model: OPENJEV_MODEL };
+    }
+    if (explicit === 'typesafe') {
+        return { name: 'typesafe', endpoint: JEV_ENDPOINT, apiKeyEnv: JEV_API_KEY_ENV, model };
+    }
+    // Auto: TypeSafe if its key is set (default unchanged), otherwise OpenJEV if its key is set.
+    if (process.env[JEV_API_KEY_ENV]) {
+        return { name: 'typesafe', endpoint: JEV_ENDPOINT, apiKeyEnv: JEV_API_KEY_ENV, model };
+    }
+    if (process.env[OPENJEV_API_KEY_ENV]) {
+        return { name: 'openjev', endpoint: OPENJEV_ENDPOINT, apiKeyEnv: OPENJEV_API_KEY_ENV, model: OPENJEV_MODEL };
+    }
+    // Default to TypeSafe so existing error messages are unchanged.
+    return { name: 'typesafe', endpoint: JEV_ENDPOINT, apiKeyEnv: JEV_API_KEY_ENV, model };
+}
+
 const MAX_DIFF_CHARS = 8000;
 const MAX_SOURCE_CHARS = 6000;
 const MAX_EXPORTED_SYMBOLS = 20;
@@ -47,6 +86,12 @@ export interface JevScorerOptions {
     skipCache?: boolean;
     fetch?: typeof fetch;
     retryBaseMs?: number;
+    /** Provider name used in cache keys. Defaults to 'typesafe'. */
+    provider?: JevProviderName;
+    /** API endpoint. Defaults to the TypeSafe endpoint. */
+    endpoint?: string;
+    /** Env var name used in error messages. Defaults to TYPESAFE_API_KEY. */
+    apiKeyEnv?: string;
 }
 
 export interface JevScoreResult {
@@ -166,8 +211,8 @@ function isRetryableStatus(status: number): boolean {
     return status === 408 || status === 429 || status >= 500;
 }
 
-function describeFailure(status: number, body: string): string {
-    const hint = status === 401 || status === 403 ? `; check ${JEV_API_KEY_ENV}` : '';
+function describeFailure(status: number, body: string, apiKeyEnv: string): string {
+    const hint = status === 401 || status === 403 ? `; check ${apiKeyEnv}` : '';
     return `HTTP ${status}${hint}: ${body.slice(0, 200)}`;
 }
 
@@ -204,10 +249,16 @@ export class JevScorer {
     private readonly options: JevScorerOptions;
     private readonly cacheFile: string;
     private readonly fetchImpl: typeof fetch;
+    private readonly provider: JevProviderName;
+    private readonly endpoint: string;
+    private readonly apiKeyEnv: string;
 
     constructor(options: JevScorerOptions) {
+        this.provider = options.provider ?? JEV_PROVIDER;
+        this.endpoint = options.endpoint ?? JEV_ENDPOINT;
+        this.apiKeyEnv = options.apiKeyEnv ?? JEV_API_KEY_ENV;
         if (!options.apiKey) {
-            throw new JevError(`${JEV_API_KEY_ENV} is required for the jev ranker`);
+            throw new JevError(`${this.apiKeyEnv} is required for the jev ranker`);
         }
         this.options = options;
         this.cacheFile = getJevCacheFile(options.cacheDir);
@@ -228,7 +279,7 @@ export class JevScorer {
         const state = buildJevState(source);
         const questions = candidates.map((candidate) => buildJevQuestion(source, candidate));
         const keys = questions.map((question) =>
-            buildCacheKey(JEV_PROVIDER, this.options.model, JSON.stringify({ state, question }))
+            buildCacheKey(this.provider, this.options.model, JSON.stringify({ state, question }))
         );
         const cache = this.options.skipCache ? {} : await this.getCache();
         const scores = new Map<string, number>();
@@ -276,7 +327,7 @@ export class JevScorer {
                     if (!this.options.skipCache && response.model === this.options.model) {
                         this.pending[keys[index]] = {
                             createdAt: new Date().toISOString(),
-                            provider: JEV_PROVIDER,
+                            provider: this.provider,
                             model: response.model,
                             noul,
                         };
@@ -317,7 +368,7 @@ export class JevScorer {
     /** Sends one request. Retryable failures are returned; others throw JevError. */
     private async attempt(payload: string): Promise<JevAttempt> {
         try {
-            const response = await this.fetchImpl(JEV_ENDPOINT, {
+            const response = await this.fetchImpl(this.endpoint, {
                 method: 'POST',
                 headers: {
                     Authorization: `Bearer ${this.options.apiKey}`,
@@ -333,7 +384,7 @@ export class JevScorer {
                     ? { response: body }
                     : { failure: 'response has no answers or model', retryAfterMs: 0 };
             }
-            const failure = describeFailure(response.status, await response.text());
+            const failure = describeFailure(response.status, await response.text(), this.apiKeyEnv);
             if (!isRetryableStatus(response.status)) {
                 throw new JevError(`Jev request failed (${failure})`);
             }

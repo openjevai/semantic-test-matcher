@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import { resolveConfig } from '../config.ts';
-import { getJevCacheEntryCount, JEV_API_KEY_ENV } from '../services/jev.ts';
+import { getJevCacheEntryCount, JEV_API_KEY_ENV, OPENJEV_API_KEY_ENV, resolveJevProvider } from '../services/jev.ts';
 
 export function registerStatusCommand(program: Command): void {
     program
@@ -22,14 +22,22 @@ export function registerStatusCommand(program: Command): void {
 
             const cacheEntries = await getJevCacheEntryCount(config.cacheDir);
             const configFileStatus = config.configFile ? 'present' : 'missing';
-            const jevApiKey = process.env[JEV_API_KEY_ENV] ? 'set' : 'missing';
+            const typesafeKey = process.env[JEV_API_KEY_ENV] ? 'set' : 'missing';
+            const openjevKey = process.env[OPENJEV_API_KEY_ENV] ? 'set' : 'missing';
+            const provider = resolveJevProvider(config.jevProvider, config.jevModel);
 
             if (options.json) {
                 console.log(
                     JSON.stringify({
                         ranker: config.ranker,
                         jevModel: config.jevModel,
-                        jevApiKey,
+                        jevProvider: config.jevProvider,
+                        resolvedProvider: provider.name,
+                        resolvedEndpoint: provider.endpoint,
+                        resolvedModel: provider.model,
+                        typesafeApiKey: typesafeKey,
+                        openjevApiKey: openjevKey,
+                        jevApiKey: provider.name === 'openjev' ? openjevKey : typesafeKey,
                         logLevel: config.logLevel,
                         cacheDir: config.cacheDir,
                         cacheEntries,
@@ -43,7 +51,10 @@ export function registerStatusCommand(program: Command): void {
 
             console.log(`ranker: ${config.ranker}`);
             console.log(`jev model: ${config.jevModel}`);
-            console.log(`jev api key (${JEV_API_KEY_ENV}): ${jevApiKey}`);
+            console.log(`jev provider: ${config.jevProvider} (resolved: ${provider.name})`);
+            console.log(`jev endpoint: ${provider.endpoint}`);
+            console.log(`jev api key (${JEV_API_KEY_ENV}): ${typesafeKey}`);
+            console.log(`openjev api key (${OPENJEV_API_KEY_ENV}): ${openjevKey}`);
             console.log(`logLevel: ${config.logLevel}`);
             console.log(`cacheDir: ${config.cacheDir}`);
             console.log(`cache entries: ${cacheEntries}`);

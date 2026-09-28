@@ -4,7 +4,7 @@ import path from 'node:path';
 import { findPathsOutside, normalizePathSeparators } from '../utils/paths.ts';
 import { resolveConfig } from '../config.ts';
 import { buildDocumentProfile, isTestLike } from '../services/document-profile.ts';
-import { JEV_API_KEY_ENV, JevScorer } from '../services/jev.ts';
+import { JevScorer, resolveJevProvider } from '../services/jev.ts';
 import { filterMatches, rankMatches, type RankedMatchCandidate } from '../services/match.ts';
 import { collectCandidateFilesDetailed, readCandidateText } from '../utils/files.ts';
 import { mapWithConcurrency } from '../utils/async.ts';
@@ -84,8 +84,9 @@ export function registerBenchmarkCommand(program: Command): void {
         .option('-c, --candidates <patterns...>', 'Candidate file paths, directories, or file globs')
         .option('--include-file <patterns...>', 'Include only matching files (glob pattern)')
         .option('--exclude-file <patterns...>', 'Exclude matching files (glob pattern)')
-        .option('--ranker <name>', `jev (TypeSafe API, default; key from ${JEV_API_KEY_ENV}) or heuristics (local only)`)
-        .option('--jev-model <id>', 'TypeSafe Jev model id')
+        .option('--ranker <name>', `jev (TypeSafe or OpenJEV API, default; key from TYPESAFE_API_KEY or OPENJEV_API_KEY) or heuristics (local only)`)
+        .option('--jev-model <id>', 'Jev model id (TypeSafe: jev-1.13.0 default; OpenJEV: openjev)')
+        .option('--jev-provider <name>', 'Jev provider: typesafe (default), openjev, or auto (env-based)')
         .option('--cache-dir <path>', 'Directory used to cache Jev answers')
         .option('--diff-root <path>', 'Base directory for relative paths in case diffs')
         .option('-t, --threshold <number>', 'Minimum similarity threshold')
@@ -98,6 +99,7 @@ export function registerBenchmarkCommand(program: Command): void {
             excludeFile?: string[];
             ranker?: string;
             jevModel?: string;
+            jevProvider?: string;
             cacheDir?: string;
             diffRoot?: string;
             threshold?: string;
@@ -120,6 +122,7 @@ export function registerBenchmarkCommand(program: Command): void {
                     excludeFile: options.excludeFile,
                     ranker: options.ranker,
                     jevModel: options.jevModel,
+                    jevProvider: options.jevProvider,
                     cacheDir: options.cacheDir,
                     threshold: options.threshold,
                     minScore: options.minScore,
@@ -137,10 +140,14 @@ export function registerBenchmarkCommand(program: Command): void {
                 cwd
             );
             // Unlike match, a benchmark never falls back: a missing key or API failure is an error.
+            const provider = resolveJevProvider(config.jevProvider, config.jevModel);
             const jevScorer = config.ranker === 'jev'
                 ? new JevScorer({
-                    apiKey: process.env[JEV_API_KEY_ENV] ?? '',
-                    model: config.jevModel,
+                    apiKey: process.env[provider.apiKeyEnv] ?? '',
+                    model: provider.model,
+                    endpoint: provider.endpoint,
+                    provider: provider.name,
+                    apiKeyEnv: provider.apiKeyEnv,
                     cacheDir: config.cacheDir,
                 })
                 : undefined;

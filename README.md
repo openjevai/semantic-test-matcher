@@ -2,6 +2,8 @@
 
 `semantic-test-matcher` is a TypeScript CLI for semantic test matching. It exposes the `rbt` command, which ranks likely test files for a changed source file, inspects resolved runtime configuration, and prints shell completion scripts.
 
+> **OpenJEV support:** Jev is built by [TypeSafe](https://typesafe.ai). This fork keeps TypeSafe as the default and adds optional support for [OpenJEV](https://openjev.sh), a free community gateway to the same Jev model — set `OPENJEV_API_KEY` (or `JEV_PROVIDER=openjev`) to use it. Original project: https://github.com/JustasMonkev/semantic-test-matcher by @JustasMonkev.
+
 The matching flow combines:
 
 - document profiling from file paths, code structure, and diffs
@@ -63,12 +65,15 @@ flowchart TD
 
 - Node.js 22.12 or newer
 - a TypeSafe API key from [console.typesafe.ai/keys](https://console.typesafe.ai/keys) in `TYPESAFE_API_KEY` (without one, `rbt` ranks with local heuristics only)
+- **or** an OpenJEV API key from [openjev.sh/dashboard](https://openjev.sh/dashboard) in `OPENJEV_API_KEY` — OpenJEV is a free community gateway to the same Jev model. If only `OPENJEV_API_KEY` is set, it is used automatically; if both keys are set, TypeSafe is the default unless `JEV_PROVIDER=openjev` is set.
 
 ## Install
 
 ```bash
 npm install --global semantic-test-matcher
 export TYPESAFE_API_KEY=...
+# or, using OpenJEV instead:
+# export OPENJEV_API_KEY=...
 ```
 
 Verify the installation:
@@ -143,6 +148,7 @@ Useful flags:
 - `--candidates-from-stdin`
 - `--ranker <jev|heuristics>`
 - `--jev-model <id>`
+- `--jev-provider <typesafe|openjev|auto>`
 - `--cache-dir <path>`
 - `--diff-file <path>`
 - `--diff-root <path>` (set the base for relative diff paths, such as `.` for `git diff --relative`)
@@ -163,10 +169,10 @@ There is no default count cap for `adaptive`. `--top-k` (or its config/environme
 
 ### How Jev is used
 
-- **Data leaves your machine.** Each request sends the changed file's path, exported symbol names, and its diff hunks (or, without `--diff-file`, the first 6,000 characters of the file; with `--diff-file`, source text is never sent, even for a file the diff has no text hunks for), plus each candidate test file's path and test titles, to `api.typesafe.ai`. Candidate file bodies are not sent. Review TypeSafe's [data handling](https://docs.typesafe.ai/legal) before using it on private code. Use `--ranker heuristics` to keep everything local.
+- **Data leaves your machine.** Each request sends the changed file's path, exported symbol names, and its diff hunks (or, without `--diff-file`, the first 6,000 characters of the file; with `--diff-file`, source text is never sent, even for a file the diff has no text hunks for), plus each candidate test file's path and test titles, to `api.typesafe.ai` (or `api.openjev.sh` when using OpenJEV). Candidate file bodies are not sent. Review TypeSafe's [data handling](https://docs.typesafe.ai/legal) before using it on private code. Use `--ranker heuristics` to keep everything local.
 - **Pass a diff.** Jev is most useful with `--diff-file`, because it can then judge the actual change rather than the whole file.
-- **Fallback.** If `TYPESAFE_API_KEY` is missing or the API fails after retries, `match` prints a warning to stderr and ranks with heuristics only. JSON output reports the effective `ranker` and a `rankerFallback` reason, so CI can detect the downgrade. When Jev answers, JSON also lists every model version whose answers were used in `jev.models`. `benchmark` fails instead of falling back.
-- **Caching and model pinning.** Answers are cached per change and candidate in `<cacheDir>/jev.json`, so repeat runs make no requests. The default model is pinned to `jev-1.13.0`. `jev-latest` also works, but its answers can change when TypeSafe ships a new version, so they are never cached: only answers from the exact model requested are reused.
+- **Fallback.** If the resolved API key is missing or the API fails after retries, `match` prints a warning to stderr and ranks with heuristics only. JSON output reports the effective `ranker` and a `rankerFallback` reason, so CI can detect the downgrade. When Jev answers, JSON also lists every model version whose answers were used in `jev.models`. `benchmark` fails instead of falling back.
+- **Caching and model pinning.** Answers are cached per change and candidate in `<cacheDir>/jev.json`, so repeat runs make no requests. The default model is pinned to `jev-1.13.0` (TypeSafe) or `openjev` (OpenJEV). `jev-latest` also works with TypeSafe, but its answers can change when TypeSafe ships a new version, so they are never cached: only answers from the exact model requested are reused.
 - **Cost.** Jev bills input tokens only, at $0.042 per million. A change with ~30 candidates is roughly 2,000–7,000 tokens.
 
 ### `benchmark`
@@ -180,7 +186,7 @@ rbt benchmark --cases cases.json --candidates tests --ranker heuristics
 
 ### `status`
 
-Prints the resolved runtime configuration, whether `TYPESAFE_API_KEY` is set, and cache stats.
+Prints the resolved runtime configuration, the Jev provider (TypeSafe or OpenJEV), whether each API key is set, and cache stats.
 
 ```bash
 rbt status
@@ -217,6 +223,7 @@ Example config:
 {
   "ranker": "jev",
   "jevModel": "jev-1.13.0",
+  "jevProvider": "auto",
   "cacheDir": ".rbt/cache",
   "logLevel": "info",
   "match": {
@@ -238,6 +245,7 @@ Environment variables used by the resolver include:
 
 - `RBT_RANKER`
 - `RBT_JEV_MODEL`
+- `JEV_PROVIDER` (`typesafe`, `openjev`, or `auto` — default; `auto` uses TypeSafe if `TYPESAFE_API_KEY` is set, otherwise OpenJEV if `OPENJEV_API_KEY` is set)
 - `RBT_CACHE_DIR`
 - `RBT_LOG_LEVEL`
 - `RBT_VERBOSE`
@@ -252,7 +260,7 @@ Environment variables used by the resolver include:
 
 A variable set to an empty string counts as unset, so config and defaults still apply.
 
-`TYPESAFE_API_KEY` supplies the Jev API key. It is only read from the environment, never from config files.
+`TYPESAFE_API_KEY` supplies the TypeSafe Jev API key. `OPENJEV_API_KEY` supplies the OpenJEV gateway key. Both are only read from the environment, never from config files.
 
 ### Cache
 

@@ -7,9 +7,9 @@ import { mapWithConcurrency } from '../utils/async.ts';
 import { resolveConfig, type Ranker, type RootOptions, type RuntimeConfig } from '../config.ts';
 import {
     getJevCacheEntryCount,
-    JEV_API_KEY_ENV,
     JevError,
     JevScorer,
+    resolveJevProvider,
     type JevScoreResult,
 } from '../services/jev.ts';
 import {
@@ -38,6 +38,7 @@ interface MatchOptions {
     excludeFile?: string[];
     ranker?: string;
     jevModel?: string;
+    jevProvider?: string;
     cacheDir?: string;
     diffFile?: string;
     diffRoot?: string;
@@ -75,8 +76,9 @@ export function registerMatchCommand(program: Command): void {
         .option('--include-file <pattern>', 'Include only matching files (glob pattern; repeat for several)', collect)
         .option('--exclude-file <pattern>', 'Exclude matching files (glob pattern; repeat for several)', collect)
         .option('--candidates-from-stdin', 'Read candidate file list (JSON array or newline list) from stdin')
-        .option('--ranker <name>', `jev (TypeSafe API, default; key from ${JEV_API_KEY_ENV}) or heuristics (local only)`)
-        .option('--jev-model <id>', 'TypeSafe Jev model id')
+        .option('--ranker <name>', `jev (TypeSafe or OpenJEV API, default; key from TYPESAFE_API_KEY or OPENJEV_API_KEY) or heuristics (local only)`)
+        .option('--jev-model <id>', 'Jev model id (TypeSafe: jev-1.13.0 default; OpenJEV: openjev)')
+        .option('--jev-provider <name>', 'Jev provider: typesafe (default), openjev, or auto (env-based)')
         .option('--cache-dir <path>', 'Directory used to cache Jev answers')
         .option('--diff-file <path>', 'Unified diff file used to enrich change-aware matching')
         .option('--diff-root <path>', 'Base directory for relative paths in --diff-file')
@@ -151,6 +153,7 @@ async function resolveMatchConfig(rootOptions: RootOptions, options: MatchOption
             excludeFile: options.excludeFile,
             ranker: options.ranker,
             jevModel: options.jevModel,
+            jevProvider: options.jevProvider,
             cacheDir: options.cacheDir,
             json: options.json,
         },
@@ -254,9 +257,13 @@ async function matchChangedFiles(
     if (ranker === 'jev') {
         let scorer: JevScorer | undefined;
         try {
+            const provider = resolveJevProvider(config.jevProvider, config.jevModel);
             scorer = new JevScorer({
-                apiKey: process.env[JEV_API_KEY_ENV] ?? '',
-                model: config.jevModel,
+                apiKey: process.env[provider.apiKeyEnv] ?? '',
+                model: provider.model,
+                endpoint: provider.endpoint,
+                provider: provider.name,
+                apiKeyEnv: provider.apiKeyEnv,
                 cacheDir: config.cacheDir,
             });
             for (const { source, fileCandidates } of changed) {

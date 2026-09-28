@@ -27,6 +27,7 @@ export interface MatchDefaults {
 export interface AppConfig {
     ranker?: Ranker;
     jevModel?: string;
+    jevProvider?: string;
     cacheDir?: string;
     logLevel?: LogLevel;
     quiet?: boolean;
@@ -37,6 +38,7 @@ export interface AppConfig {
 export interface RuntimeConfig {
     ranker: Ranker;
     jevModel: string;
+    jevProvider: string;
     cacheDir: string;
     logLevel: LogLevel;
     quiet: boolean;
@@ -63,6 +65,7 @@ export interface MatchCommandOptions {
     excludeFile?: string[];
     ranker?: string;
     jevModel?: string;
+    jevProvider?: string;
     cacheDir?: string;
     json?: boolean;
 }
@@ -165,6 +168,7 @@ export async function resolveConfig(
     // Every setting resolves as: CLI flag, then RBT_* environment variable, then config file, then default.
     const ranker = parseRanker(commandOptions.ranker ?? readEnv('RBT_RANKER') ?? fileConfig.ranker ?? DEFAULT_CONFIG.ranker);
     const jevModel = commandOptions.jevModel ?? readEnv('RBT_JEV_MODEL') ?? fileConfig.jevModel ?? DEFAULT_CONFIG.jevModel;
+    const jevProvider = (commandOptions.jevProvider ?? readEnv('JEV_PROVIDER') ?? fileConfig.jevProvider ?? 'auto').trim().toLowerCase();
     const logLevel = parseLogLevel(
         rootOptions.logLevel ?? readEnv('RBT_LOG_LEVEL') ?? fileConfig.logLevel ?? DEFAULT_CONFIG.logLevel
     );
@@ -200,6 +204,7 @@ export async function resolveConfig(
     return {
         ranker,
         jevModel,
+        jevProvider,
         cacheDir: path.resolve(cwd, cacheDirOverride ?? fileConfig.cacheDir ?? DEFAULT_CONFIG.cacheDir),
         logLevel,
         quiet,
